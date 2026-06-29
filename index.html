@@ -1215,7 +1215,7 @@ try {
     SUPABASE_ANON_KEY
   );
 } catch (e) {
-  console.warn("Supabase not configured — running in demo mode");
+  console.error("Supabase initialization failed:", e);
 }
 
 // ═══════════════════════════════════════════════════
