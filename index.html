@@ -1203,14 +1203,14 @@ body {
 // ═══════════════════════════════════════════════════
 // SUPABASE CONFIG — Replace with your project values
 // ═══════════════════════════════════════════════════
-const SUPABASE_URL = 'https://tzefikvpnxpkfnndenip.supabaseClient.co';
+const SUPABASE_URL = 'https://tzefikvpnxpkfnndenip.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_9Ujr63KHzn-UOtWrNVNd1g_GKb-rIe7';
 
 // ── Init Supabase ──
 let supabaseClient = null;
 
 try {
-  supabaseClient = window.supabaseClient.createClient(
+  supabaseClient = window.supabase.createClient(
     SUPABASE_URL,
     SUPABASE_ANON_KEY
   );
@@ -2324,7 +2324,7 @@ function toast(msg, type = '') {
 
 // Check Supabase session on load
 (async () => {
-  if (supabase && !SUPABASE_URL.includes('YOUR-PROJECT')) {
+  if (supabaseClient && !SUPABASE_URL.includes('YOUR-PROJECT')) {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) {
       state.user = session.user;
