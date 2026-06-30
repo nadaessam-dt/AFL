@@ -1207,15 +1207,20 @@ const SUPABASE_URL = 'https://tzefikvpnxpkfnndenip.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_9Ujr63KHzn-UOtWrNVNd1g_GKb-rIe7';
 
 // ── Init Supabase ──
-let supabaseClient = null;
+let supabase = null;
 
 try {
-  supabaseClient = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY
-  );
+  console.log("SUPABASE_URL =", SUPABASE_URL);
+  console.log("SUPABASE_ANON_KEY =", SUPABASE_ANON_KEY);
+  console.log("window.supabase (CDN lib) =", window.supabase);
+
+  const supabaseLib = window.supabase; // CDN namespace, captured BEFORE we overwrite the `supabase` identifier
+  supabase = supabaseLib.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  console.log("Supabase client created:", supabase);
 } catch (e) {
-  console.error("Supabase initialization failed:", e);
+  console.error("createClient exception:", e);
+  throw e;
 }
 
 // ═══════════════════════════════════════════════════
@@ -1284,7 +1289,7 @@ async function doLogin() {
   }
 
   try {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pw });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pw });
     if (error) { err.textContent = error.message; btn.textContent = 'Sign In →'; btn.disabled = false; return; }
     state.user = data.user;
     await loadUserProfile();
@@ -1297,7 +1302,7 @@ async function doLogin() {
 
 async function loadUserProfile() {
   try {
-    const { data } = await supabaseClient.from('profiles').select('*').eq('id', state.user.id).single();
+    const { data } = await supabase.from('profiles').select('*').eq('id', state.user.id).single();
     if (data) { state.userRole = data.role; state.userName = data.full_name || state.user.email; }
     else { state.userRole = 'sales'; state.userName = state.user.email; }
   } catch(e) { state.userRole = 'sales'; state.userName = state.user.email; }
@@ -1320,7 +1325,7 @@ async function postLoginSetup() {
 }
 
 async function doLogout() {
-  if (!state.demoMode && supabase) await supabaseClient.auth.signOut();
+  if (!state.demoMode && supabase) await supabase.auth.signOut();
   location.reload();
 }
 
@@ -1352,11 +1357,11 @@ async function loadData() {
   try {
     const today = todayStr();
     const [visRes, meetRes, userRes] = await Promise.all([
-      supabaseClient.from('visitors').select('*').order('created_at', { ascending: false }),
+      supabase.from('visitors').select('*').order('created_at', { ascending: false }),
       state.userRole === 'admin'
-        ? supabaseClient.from('meetings').select('*,profiles(full_name)').order('created_at', { ascending: false })
-        : supabaseClient.from('meetings').select('*,profiles(full_name)').eq('user_id', state.user.id).order('created_at', { ascending: false }),
-      supabaseClient.from('profiles').select('id, full_name, role').eq('role', 'sales'),
+        ? supabase.from('meetings').select('*,profiles(full_name)').order('created_at', { ascending: false })
+        : supabase.from('meetings').select('*,profiles(full_name)').eq('user_id', state.user.id).order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id, full_name, role').eq('role', 'sales'),
     ]);
     state.visitors = visRes.data || [];
     state.meetings = meetRes.data || [];
@@ -1420,7 +1425,7 @@ async function addVisitor() {
 
   if (!state.demoMode && supabase && state.isOnline) {
     try {
-      const { data, error } = await supabaseClient.from('visitors').insert(record).select().single();
+      const { data, error } = await supabase.from('visitors').insert(record).select().single();
       state.lastVisitorId = data?.id || record.id;
     } catch(e) { queueOffline('insert', 'visitors', record); state.lastVisitorId = record.id; }
   } else {
@@ -1461,7 +1466,7 @@ async function undoVisitor() {
   updateConversionRate();
 
   if (!state.demoMode && supabase && state.isOnline) {
-    try { await supabaseClient.from('visitors').delete().eq('id', state.lastVisitorId); } catch(e) {}
+    try { await supabase.from('visitors').delete().eq('id', state.lastVisitorId); } catch(e) {}
   }
   state.lastVisitorId = null;
   toast('Visitor removed', 'success');
@@ -1681,12 +1686,12 @@ async function saveMeeting() {
   } else if (supabase && state.isOnline) {
     try {
       if (existingId) {
-        await supabaseClient.from('meetings').update(record).eq('id', existingId);
+        await supabase.from('meetings').update(record).eq('id', existingId);
         const idx = state.meetings.findIndex(m => m.id === existingId);
         if (idx > -1) state.meetings[idx] = { ...state.meetings[idx], ...record };
       } else {
         record.created_at = new Date().toISOString();
-        const { data } = await supabaseClient.from('meetings').insert(record).select().single();
+        const { data } = await supabase.from('meetings').insert(record).select().single();
         if (data) state.meetings.unshift(data);
       }
       toast('Meeting saved ✅', 'success');
@@ -2270,8 +2275,8 @@ async function syncOfflineQueue() {
   localStorage.setItem('afl_offline_queue', '[]');
   for (const item of queue) {
     try {
-      if (item.action === 'insert') await supabaseClient.from(item.table).insert(item.data);
-      if (item.action === 'update') await supabaseClient.from(item.table).update(item.data).eq('id', item.data.id);
+      if (item.action === 'insert') await supabase.from(item.table).insert(item.data);
+      if (item.action === 'update') await supabase.from(item.table).update(item.data).eq('id', item.data.id);
     } catch(e) { state.offlineQueue.push(item); }
   }
   if (state.offlineQueue.length > 0) localStorage.setItem('afl_offline_queue', JSON.stringify(state.offlineQueue));
@@ -2324,8 +2329,8 @@ function toast(msg, type = '') {
 
 // Check Supabase session on load
 (async () => {
-  if (supabaseClient && !SUPABASE_URL.includes('YOUR-PROJECT')) {
-    const { data: { session } } = await supabaseClient.auth.getSession();
+  if (supabase && !SUPABASE_URL.includes('YOUR-PROJECT')) {
+    const { data: { session } } = await supabase.auth.getSession();
     if (session) {
       state.user = session.user;
       await loadUserProfile();
