@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@db/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -1206,21 +1206,37 @@ body {
 const SUPABASE_URL = 'https://tzefikvpnxpkfnndenip.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_9Ujr63KHzn-UOtWrNVNd1g_GKb-rIe7';
 
-// ── Init Supabase ──
-let supabase = null;
+// ── Init Supabase (SINGLE client instance, single identifier: `db`) ──
+// `db` is used everywhere in this file to refer to the Supabase client.
+// It intentionally does NOT use the name `db`, because the CDN script
+// above creates a global `window.supabase` namespace object — reusing that
+// name for the client instance causes silent bugs (truthy-but-wrong checks).
+let db = null;
+let dbInitError = null;
 
 try {
-  console.log("SUPABASE_URL =", SUPABASE_URL);
-  console.log("SUPABASE_ANON_KEY =", SUPABASE_ANON_KEY);
-  console.log("window.supabase (CDN lib) =", window.supabase);
-
-  const supabaseLib = window.supabase; // CDN namespace, captured BEFORE we overwrite the `supabase` identifier
-  supabase = supabaseLib.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  console.log("Supabase client created:", supabase);
+  if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
+    throw new Error('Supabase CDN library failed to load (window.supabase is unavailable)');
+  }
+  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 } catch (e) {
-  console.error("createClient exception:", e);
-  throw e;
+  dbInitError = e;
+  console.error('Supabase initialization failed:', e);
+}
+
+// Demo mode is ONLY true if the real client failed to initialize.
+// It is never derived from string-matching the URL/key, since that is
+// fragile and can misfire on legitimate production values.
+const DEMO_MODE_FORCED = (db === null);
+
+// Single auth state listener — keeps session state in sync (e.g. token
+// refresh, sign-out in another tab). Registered exactly once.
+if (db) {
+  db.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT') {
+      state.user = null;
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════
@@ -1266,8 +1282,10 @@ async function doLogin() {
   btn.disabled = true;
   err.textContent = '';
 
-  // Demo mode fallback (when Supabase not configured)
-  if (SUPABASE_URL.includes('YOUR-PROJECT')) {
+  // Demo mode fallback — triggered ONLY when the real Supabase client
+  // genuinely failed to initialize (see DEMO_MODE_FORCED above).
+  // This can never misfire on a valid production URL/key.
+  if (DEMO_MODE_FORCED) {
     await sleep(800);
     if (email === 'admin@daltex.com' && pw === 'admin123') {
       state.user = { id: 'demo-admin', email };
@@ -1289,12 +1307,14 @@ async function doLogin() {
   }
 
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pw });
+    const { data, error } = await db.auth.signInWithPassword({ email, password: pw });
     if (error) { err.textContent = error.message; btn.textContent = 'Sign In →'; btn.disabled = false; return; }
     state.user = data.user;
+    state.demoMode = false;
     await loadUserProfile();
     await postLoginSetup();
   } catch(e) {
+    console.error('Login error:', e);
     err.textContent = 'Connection error. Check your network.';
   }
   btn.textContent = 'Sign In →'; btn.disabled = false;
@@ -1302,7 +1322,7 @@ async function doLogin() {
 
 async function loadUserProfile() {
   try {
-    const { data } = await supabase.from('profiles').select('*').eq('id', state.user.id).single();
+    const { data } = await db.from('profiles').select('*').eq('id', state.user.id).single();
     if (data) { state.userRole = data.role; state.userName = data.full_name || state.user.email; }
     else { state.userRole = 'sales'; state.userName = state.user.email; }
   } catch(e) { state.userRole = 'sales'; state.userName = state.user.email; }
@@ -1325,7 +1345,7 @@ async function postLoginSetup() {
 }
 
 async function doLogout() {
-  if (!state.demoMode && supabase) await supabase.auth.signOut();
+  if (!state.demoMode && db) await db.auth.signOut();
   location.reload();
 }
 
@@ -1357,11 +1377,11 @@ async function loadData() {
   try {
     const today = todayStr();
     const [visRes, meetRes, userRes] = await Promise.all([
-      supabase.from('visitors').select('*').order('created_at', { ascending: false }),
+      db.from('visitors').select('*').order('created_at', { ascending: false }),
       state.userRole === 'admin'
-        ? supabase.from('meetings').select('*,profiles(full_name)').order('created_at', { ascending: false })
-        : supabase.from('meetings').select('*,profiles(full_name)').eq('user_id', state.user.id).order('created_at', { ascending: false }),
-      supabase.from('profiles').select('id, full_name, role').eq('role', 'sales'),
+        ? db.from('meetings').select('*,profiles(full_name)').order('created_at', { ascending: false })
+        : db.from('meetings').select('*,profiles(full_name)').eq('user_id', state.user.id).order('created_at', { ascending: false }),
+      db.from('profiles').select('id, full_name, role').eq('role', 'sales'),
     ]);
     state.visitors = visRes.data || [];
     state.meetings = meetRes.data || [];
@@ -1423,9 +1443,9 @@ async function addVisitor() {
 
   const record = { id: crypto.randomUUID(), date: todayStr(), created_at: new Date().toISOString(), user_id: state.user?.id || 'demo', user_name: state.userName };
 
-  if (!state.demoMode && supabase && state.isOnline) {
+  if (!state.demoMode && db && state.isOnline) {
     try {
-      const { data, error } = await supabase.from('visitors').insert(record).select().single();
+      const { data, error } = await db.from('visitors').insert(record).select().single();
       state.lastVisitorId = data?.id || record.id;
     } catch(e) { queueOffline('insert', 'visitors', record); state.lastVisitorId = record.id; }
   } else {
@@ -1465,8 +1485,8 @@ async function undoVisitor() {
   document.getElementById('nav-live-count').textContent = state.todayVisitors;
   updateConversionRate();
 
-  if (!state.demoMode && supabase && state.isOnline) {
-    try { await supabase.from('visitors').delete().eq('id', state.lastVisitorId); } catch(e) {}
+  if (!state.demoMode && db && state.isOnline) {
+    try { await db.from('visitors').delete().eq('id', state.lastVisitorId); } catch(e) {}
   }
   state.lastVisitorId = null;
   toast('Visitor removed', 'success');
@@ -1683,15 +1703,15 @@ async function saveMeeting() {
       state.meetings.unshift(record);
     }
     toast('Meeting saved ✅', 'success');
-  } else if (supabase && state.isOnline) {
+  } else if (db && state.isOnline) {
     try {
       if (existingId) {
-        await supabase.from('meetings').update(record).eq('id', existingId);
+        await db.from('meetings').update(record).eq('id', existingId);
         const idx = state.meetings.findIndex(m => m.id === existingId);
         if (idx > -1) state.meetings[idx] = { ...state.meetings[idx], ...record };
       } else {
         record.created_at = new Date().toISOString();
-        const { data } = await supabase.from('meetings').insert(record).select().single();
+        const { data } = await db.from('meetings').insert(record).select().single();
         if (data) state.meetings.unshift(data);
       }
       toast('Meeting saved ✅', 'success');
@@ -2268,15 +2288,15 @@ function queueOffline(action, table, data) {
 }
 
 async function syncOfflineQueue() {
-  if (!supabase || state.demoMode || state.offlineQueue.length === 0) return;
+  if (!db || state.demoMode || state.offlineQueue.length === 0) return;
   toast(`Syncing ${state.offlineQueue.length} offline records…`);
   const queue = [...state.offlineQueue];
   state.offlineQueue = [];
   localStorage.setItem('afl_offline_queue', '[]');
   for (const item of queue) {
     try {
-      if (item.action === 'insert') await supabase.from(item.table).insert(item.data);
-      if (item.action === 'update') await supabase.from(item.table).update(item.data).eq('id', item.data.id);
+      if (item.action === 'insert') await db.from(item.table).insert(item.data);
+      if (item.action === 'update') await db.from(item.table).update(item.data).eq('id', item.data.id);
     } catch(e) { state.offlineQueue.push(item); }
   }
   if (state.offlineQueue.length > 0) localStorage.setItem('afl_offline_queue', JSON.stringify(state.offlineQueue));
@@ -2327,18 +2347,21 @@ function toast(msg, type = '') {
   setTimeout(() => el.remove(), 3000);
 }
 
-// Check Supabase session on load
+// Check Supabase session on load (session persistence / auto-login)
 (async () => {
-  if (supabase && !SUPABASE_URL.includes('YOUR-PROJECT')) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      state.user = session.user;
-      await loadUserProfile();
-      await postLoginSetup();
+  if (db) {
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      if (session) {
+        state.user = session.user;
+        await loadUserProfile();
+        await postLoginSetup();
+      }
+    } catch (e) {
+      console.error('Session restore failed:', e);
     }
   }
 })();
 </script>
 </body>
 </html>
-Fixed Supabase client initialization
