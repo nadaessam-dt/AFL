@@ -1218,7 +1218,20 @@ try {
   if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
     throw new Error('Supabase CDN library failed to load (window.supabase is unavailable)');
   }
-  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  console.log("Before createClient");
+  console.log("window.supabase =", window.supabase);
+  console.log("SUPABASE_URL =", SUPABASE_URL);
+  console.log("SUPABASE_ANON_KEY =", SUPABASE_ANON_KEY);
+
+  db = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY
+  );
+
+  console.log("After createClient");
+  console.log("db =", db);
+  console.log("db.auth =", db?.auth);
 } catch (e) {
   dbInitError = e;
   console.error('Supabase initialization failed:', e);
@@ -1307,6 +1320,10 @@ async function doLogin() {
   }
 
   try {
+    console.log("Before login");
+    console.log("db =", db);
+    console.log("db?.auth =", db?.auth);
+
     const { data, error } = await db.auth.signInWithPassword({ email, password: pw });
     if (error) { err.textContent = error.message; btn.textContent = 'Sign In →'; btn.disabled = false; return; }
     state.user = data.user;
