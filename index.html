@@ -1325,6 +1325,13 @@ async function doLogin() {
     console.log("db?.auth =", db?.auth);
 
     const { data, error } = await db.auth.signInWithPassword({ email, password: pw });
+
+    console.log("Login result:");
+    console.log("error =", error);
+    console.log("data =", data);
+    console.log("session =", data?.session);
+    console.log("user =", data?.user);
+
     if (error) { err.textContent = error.message; btn.textContent = 'Sign In →'; btn.disabled = false; return; }
     state.user = data.user;
     state.demoMode = false;
